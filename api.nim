@@ -9,17 +9,22 @@ const plugin* {.exportc.} = Plugin(
   reloadable: false # Could probably be true
 )
 
-proc setup*() {.cdecl, exportc.}
-proc teardown*() {.cdecl, exportc.}
-proc enable*() {.cdecl, exportc.}
-proc disable*() {.cdecl, exportc.}
+proc setup*(plugin: Plugin) {.cdecl, exportc.}
+proc teardown*(plugin: Plugin) {.cdecl, exportc.}
+proc enable*(plugin: Plugin) {.cdecl, exportc.}
+proc disable*(plugin: Plugin) {.cdecl, exportc.}
 ]#
 import std/[
   dynlib
 ]
 
 type
-  PluginProcedure = proc(plugin: Plugin)
+  NimMain = proc() {.gcsafe, stdcall.}
+
+  Getter[T] = proc(): T {.gcsafe, stdcall.}
+  Setter[T] = proc(t: T) {.gcsafe, stdcall.}
+
+  PluginProcedure = proc(plugin: Plugin) {.gcsafe, stdcall.}
 
   Server* {.exportc.} = ref object
     plugins*: seq[Plugin]
@@ -38,14 +43,19 @@ proc registeredPluginNames(srv: Server): seq[string] =
   for plugin in srv.plugins:
     result.add plugin.name
 
-proc registerPlugin(srv: Server, path: string) =
+proc registerPlugin*(srv: Server, path: string) =
   var libhandle = loadLib(path)
 
   if libhandle == nil:
     echo path & " is not a valid path! Skipping..."
     return
 
-  var plugin = cast[Plugin](libhandle.symAddr("plugin"))
+  let nimMain = cast[NimMain](libhandle.symAddr("NimMain"))
+
+  if nimMain != nil:
+    nimMain()
+
+  var plugin = cast[Getter[Plugin]](libhandle.symAddr("plugin"))()
 
   if plugin == nil:
     echo path & " is not a Nimberite plugin! Skipping..."
@@ -70,19 +80,30 @@ proc registerPlugin(srv: Server, path: string) =
   srv.plugins.add plugin
   return
 
+proc requestPlugin*(srv: Server, pluginName: string): Plugin =
+  for plugin in srv.plugins:
+    if plugin.name == pluginName:
+      return plugin
 
-proc requestSetup(p: Plugin): Plugin =
+  return nil
+
+proc requestSetup*(p: Plugin) =
   if p.isLoaded:
-    return p
+    return
 
-  let nimMain = cast[proc()](p.libhandle.symAddr("NimMain"))
-
-  if nimMain != nil:
-    nimMain()
+  p.isLoaded = true
 
   let setup = cast[PluginProcedure](p.libhandle.symAddr("setup"))
 
   if setup == nil:
-    return p
+    return
 
   setup(p)
+
+proc requestTeardown*(p: Plugin) =
+  let teardown = cast[PluginProcedure](p.libhandle.symAddr("teardown"))
+
+  if teardown == nil:
+    return
+
+  teardown(p)

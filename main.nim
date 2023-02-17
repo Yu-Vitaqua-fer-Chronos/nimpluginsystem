@@ -1,6 +1,5 @@
 import std/[
   os,
-  dynlib,
   strutils,
   strformat
 ]
@@ -20,9 +19,15 @@ proc start(s: Server) =
       pluginFiles.add file
 
   for pluginFile in pluginFiles:
-    discard s.registerPlugin(pluginFile)
+    s.registerPlugin(pluginFile)
 
   for plugin in s.plugins:
     requestSetup(plugin)
+    echo fmt"[{plugin.displayname}] Loaded plugin!"
 
-  #echo fmt"[{plugin.displayname}] Loaded plugin!"
+  for plugin in s.plugins:
+    requestTeardown(plugin)
+    echo fmt"[{plugin.displayname}] Unloaded plugin!"
+
+var server = Server()
+server.start()
